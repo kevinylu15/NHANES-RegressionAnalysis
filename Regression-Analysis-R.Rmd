@@ -1,0 +1,303 @@
+---
+title: "NHANES Linear Regression"
+author: "Kevin Lu"
+date: "2024-11-17"
+output:
+  pdf_document: default
+  rtf_document: true
+---
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+library("sas7bdat")
+library("corrplot")
+library("gtsummary")
+library("dplyr")
+library("ggplot2")
+library("data.table")
+library("car")
+library("NHANES")
+library("olsrr")
+```
+
+```{r}
+nhanes_data = NHANES
+```
+
+Initial data exploration of covariates that had a relation to SexAge were difficult to perform via a correlation plot due to many covariates being factors.
+```{r EDA}
+covariates = c("SexAge","Gender","HHIncome","Education","PhysActive","SameSex","AlcoholYear","RegularMarij","HardDrugs")
+sapply(df[, covariates], is.factor)
+#M = cor(df[, covariates])
+#corrplot(M, method = 'number')
+```
+
+Performing several multiple linear regressions, we found two models of interest after some exploratory data analysis with different covariates for which statistical significance persisted even after controlling for some social demographic covariates. Preliminary analysis suggest that hard drug use and regular marijuana is associated on average 1-2 years earlier first sexual activity. Thus, drug use may be associated with higher frequency of sexual activity.
+```{r EDA model 1,2,3,4}
+model <- lm(SexAge ~ SmokeNow, df)
+summary(model)
+
+model <- lm(SexAge ~ AlcoholYear, df)
+summary(model)
+
+model <- lm(SexAge ~ RegularMarij+HardDrugs+RegularMarij*HardDrugs, df)
+summary(model)
+model |>
+  tbl_regression(intercept = TRUE, show_single_row = c(RegularMarij, HardDrugs))|>
+  as_gt() |> 
+  gt::tab_header(title = "SexAge MLR")
+
+model <- lm(SexNumPartnLife ~ RegularMarij+HardDrugs+RegularMarij*HardDrugs, df)
+summary(model)
+model |>
+  tbl_regression(intercept = TRUE, show_single_row = c(RegularMarij, HardDrugs))|>
+  as_gt() |> 
+  gt::tab_header(title = "SexNumPartnLife MLR")
+
+```
+
+
+SexAge is has a good distribution but SexNumPartnLife has extreme skenwness and is discrete count data. This requires a Poisson regression which is out side the scopre of this course. Created new variable using the duration, since first sexual activity where (Age - SexAge) since Age >= SexAge, and dividing by the number of sexual partners in life to see frequency of sexual activity. New variable was log transformed due to extreme skewness that violated normality assumption, which could be checked by QQPlot.
+
+Due to extreme skewness,  we tried to find some observations that had implausible reported data that could been a typo or non serious answer. For instance, observations 8576 and 3416 reported to have had a first sexual activity at 9 with 360 and 500 sexual partners in life, respectively. Observations 4579 and 4580 reported to have had a first sexual activity at 10 and both reportedly had 700 sexual partners in life. Observations 4579 and 4580 reported to have had a first sexual activity at 10 and both reportedly had 700 sexual partners in life. We removed these outliers.
+```{R New variable}
+hist(df$SexAge, main= "First Age at which Sexual Activity Occured")
+hist(df$SexNumPartYear, main = )
+hist(df$SexNumPartnLife)
+
+#Show observations for which SexAge > Age, None
+df[which(df$SexAge > df$Age), ]
+
+#Show observations with more than 40 sexual partners during lifetime
+boxplot(df$SexNumPartnLife, main = "Number of sexual partners dist. before outlier removal")
+df[which(df$SexNumPartnLife > 40), c("Age", "SexAge", "SexNumPartnLife")]
+#Remove observations with more than 40 sexual partners during lifetime
+df = df[-which(df$SexNumPartnLife > 40),]
+boxplot(df$SexNumPartnLife, main = "Number of sexual partners dist. after outlier removal")
+
+ 
+#Before log transformation
+df = mutate(df, AvgSexFreq = SexNumPartnLife/(Age-SexAge))
+hist(df$AvgSexFreq, main = "AvgSexFreq Before log transformation")
+#After log transformation
+df = mutate(df, AvgSexFreq = log(SexNumPartnLife/(Age-SexAge)))
+hist(df$AvgSexFreq, main = "AvgSexFreq After log transformation")
+
+tbl_summary(df, by = HardDrugs,
+    statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} / {N} ({p}%)"
+    ))
+```
+
+$$AvgSexFreq = \log\left(\frac{SexNumPartnLife}{Age - SexAge}\right)$$
+
+```{R New variable test}
+#Remove negative infinity from numerator(NumPartnLife) or Age-SexAge being 0 for and change to zero.
+obs = df[is.infinite(df$AvgSexFreq),]
+obs[, c("Age","SexAge", "SexNumPartnLife")]
+df$AvgSexFreq[is.infinite(df$AvgSexFreq)] = 0
+#unique(df$AvgSexFreq)
+
+model <- lm(AvgSexFreq ~ SmokeNow+AlcoholYear+RegularMarij+HardDrugs+RegularMarij*HardDrugs+Age+Gender+HHIncome+Education+BMI+DiabetesAge+Depressed+LittleInterest+PhysActive+SameSex, df)
+summary(model)
+model |>
+  tbl_regression(intercept = TRUE,show_single_row = c(RegularMarij, HardDrugs,Gender, PhysActive, SameSex))|>
+  as_gt() |> 
+  gt::tab_header(title = "Full model")
+
+```
+
+Using the sequential sum of squares we tested for each block of covariates at a significance level 0.001.
+
+```{r Sequential SS}
+n = 30
+aov = anova(model <- lm(AvgSexFreq ~ SmokeNow+AlcoholYear+RegularMarij+HardDrugs+RegularMarij*HardDrugs+Age+Gender+HHIncome+Education+BMI+DiabetesAge+Depressed+LittleInterest+PhysActive+SameSex, df))
+aov
+SSY = sum(aov$"Sum Sq")
+SSQ = aov$"Sum Sq"
+MSE = aov$"Mean Sq"[16]
+ss1 = sum(SSQ[c(1:4, 15)])
+print(ss1)
+fstat1 = ss1/5/MSE
+pval1 = 1-pf(q = fstat1, df1 = 5, df2 = n-16)
+print(c(fstat1, pval1))
+ss2 = sum(SSQ[5:8])
+print(ss2)
+fstat2 = ss2/4/MSE
+pval2 = 1-pf(q = fstat2, df1 = 4, df2 = n-16)
+print(c(fstat2, pval2))
+ss3 = sum(SSQ[9:14])
+print(ss3)
+fstat3 = ss3/5/MSE
+pval3 = 1-pf(q = fstat3, df1 = 5, df2 = n-16)
+print(c(fstat3, pval3))
+ss4 = sum(SSQ[14])
+print(ss4)
+fstat4 = ss3/1/MSE
+pval4 = 1-pf(q = fstat4, df1 = 1, df2 = n-16)
+print(c(fstat4, pval4))
+
+
+```
+(i) $\boldsymbol{\beta}_{substance} = (\beta_{SmokeNow}, \beta_{AlcoholYear},\beta_{RegularMarij}, \beta_{HardDrugs}, \beta_{RegularMarij*HardDrugs})^T$
+(ii) $\boldsymbol{\beta}_{Demo} = (\beta_{Age}, \beta_{Gender}, \beta_{HHIncome}, \beta_{Education})^T$
+(iii) $\boldsymbol{\beta}_{Health} = (\beta_{BMI},\beta_{DiabetesAges},\beta_{Depressed},\beta_{LittleInterest},\beta_{PhysActive})^T$
+(iv) $\boldsymbol{\beta}_{SameSex} = (\beta_{SameSex})^T$
+
+
+```{r tbl, message=FALSE, warnings=FALSE, echo=FALSE, results='asis'}
+tbl <- c("
+| Step | Tested Var. |  SS(Num.) | SS(Denom.) | Test Stat. | Dist. | p-value | Decision | Stopping Rule | Decision |
+|------|----------|-----------|--------------|----------------|---------|-------------|-------------|------------|----------| 
+|  $$I$$  |  $$\\boldsymbol{\\beta}_{Substance}$$ |   13.88444     |  26.9329 | 5.155204576 | $$F_{5,14}$$ | 0.001262146 | `Reject `| `Do not stop` | `Collect`|
+|  $$II$$  |  $$\\boldsymbol{\\beta}_{Demo}$$ |   55.61473     |  26.9329 | 25.81174 | $$F_{4,14}$$ | 6.872507e-10 | `Reject `| `Do not stop` | `Collect`|
+|  $$III$$  |  $$\\boldsymbol{\\beta}_{Health}$$ |   5.687399     |  26.9329 | 2.11169493 | $$F_{5,14}$$ | 0.08788892 | `Fail to Reject `| `Stop` | `Not Collect`|
+|  $$IV$$  |  $$\\boldsymbol{\\beta}_{SameSex}$$ |   0.001708498     |  26.9329 | 10.55847467 | $$F_{1,14}$$ | 0.00260712 | `NA `| `NA` | `NA`|
+")
+cat(tbl, sep="")
+```
+
+Final model $$AvgSexFreq = X_{Substance}\boldsymbol\beta_{Substance} + X_{Demo}\boldsymbol\beta_{Demo} + \boldsymbol{\epsilon}, \boldsymbol\epsilon \sim N(\boldsymbol{0}, \sigma^2 I)$$
+
+```{r systematic differences of missing values}
+
+library(ggplot2)
+library(tidyr)
+#Add new column based on missingness
+covariates = c("AvgSexFreq", "SmokeNow","AlcoholYear", "RegularMarij", "HardDrugs", "Age", "Gender","HHIncome","Education")
+sum(complete.cases(df[, covariates]))
+df$missingness <- ifelse(complete.cases(df[, covariates]), "Not Missing", "Missing")
+
+tbl_summary(df[,c("Age", "Gender", "HHIncome", "Education", "MaritalStatus", "missingness")], by = missingness,
+    statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} / {N} ({p}%)"
+    ))
+
+missingness_comparison = glm(as.factor(missingness)~Age+Gender+HHIncome+Education+MaritalStatus, family = binomial, df)
+missingness_comparison |>
+  tbl_regression(intercept = TRUE)|>
+  as_gt() |> 
+  gt::tab_header(title = "Missingness Comparison")
+#for{}
+#pdf export
+```
+Missingness for occurs for those aged below 20 because they are not recorded for some covariates. Why missingness for those aged above 60 occurs is unclear.
+
+```{r missigness graphs}
+library(gridExtra)
+p1 = ggplot(data = df, mapping=aes(x=Age, fill=as.factor(missingness)))+
+  geom_bar(stat="count")+
+  scale_fill_manual(values = c("gray", "red"))
+p2 = ggplot(data = df, mapping=aes(x=Gender, fill=as.factor(missingness)))+
+  geom_bar(stat="count")+
+  scale_fill_manual(values = c("gray", "red"))
+p3 = ggplot(data = df, mapping=aes(x=Education, fill=as.factor(missingness)))+
+  geom_bar(stat="count")+
+  scale_x_discrete(labels = c("<8th", "9-11th", "HS", "Some College", "College Grad" ))+
+  scale_fill_manual(values = c("gray", "red"))
+p4 = ggplot(data = df, mapping=aes(x=MaritalStatus, fill=as.factor(missingness)))+
+  geom_bar(stat="count")+
+  scale_fill_manual(values = c("gray", "red"))
+p5 = ggplot(data = df, mapping=aes(x=HHIncome, fill=as.factor(missingness)))+
+  geom_bar(stat="count")+
+   scale_x_discrete(labels = c(1,2,3,4,5,6,7,8,9, 10, 11, 12, "NA")) +
+  scale_fill_manual(values = c("gray", "red"))
+
+grid.arrange(p1,p2,p3,p4,p5, nrow=5)
+```
+
+
+
+```{r GLH and QQplot}
+
+m1 = lm(AvgSexFreq ~ SmokeNow+AlcoholYear+RegularMarij+HardDrugs+RegularMarij*HardDrugs+Age+Gender+HHIncome+Education, df)
+summary(m1)
+
+#Perform GLH to collapse the income categories
+Contrast.T = matrix(c(0,0,0,0,0,0,0,1,-1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                      0,0,0,0,0,0,0,0,0,1,-1,0,0,0,0,0,0,0,0,0,0,0,0,
+                      0,0,0,0,0,0,0,0,0,0,1,-1,0,0,0,0,0,0,0,0,0,0,0,
+                      0,0,0,0,0,0,0,0,0,0,0,1,-1,0,0,0,0,0,0,0,0,0,0,
+                      0,0,0,0,0,0,0,0,0,0,0,0,1,-1,0,0,0,0,0,0,0,0,0,
+                      0,0,0,0,0,0,0,0,0,0,0,0,0,1,-1,0,0,0,0,0,0,0,0,
+                      0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,-1,0,0,0,0,0,0,0,
+                      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,-1,0,0,0,0,0,0,
+                      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,-1,0,0,0,0,0,
+                      1,0,0,0,0,0,0,0,0,-1,0,0,0,0,0,0,0,0,0,0,0,0,0), byrow=T, nrow=10)
+car::linearHypothesis(model=m1,hypothesis.matrix=Contrast.T)
+df = df |> mutate(segmentincome = ifelse(HHIncome == "5000-9999" | HHIncome == "10000-14999", "Low", "High"))
+m1 = lm(AvgSexFreq ~ SmokeNow+AlcoholYear+RegularMarij+HardDrugs+RegularMarij*HardDrugs+Age+Gender+segmentincome+Education, df)
+summary(m1)
+
+m1|>
+  tbl_regression(intercept = TRUE,show_single_row = c(SmokeNow, RegularMarij, HardDrugs, Gender, segmentincome))|>
+  as_gt() |> 
+  gt::tab_header(title = "AvgSexFreq MLR")
+
+m1.res = m1$residuals
+
+car::qqPlot(m1.res)
+```
+
+```{r avPlots}
+
+car::avPlots(m1)
+
+```
+
+```{r Residual Plots}
+
+
+car::residualPlots(m1, type="response")
+```
+```{r D-W Test}
+car::durbinWatsonTest(m1)
+
+```
+
+```{r multicollinearity}
+#Use a non interactive model to check for collinearity
+nonintmodel <- lm(AvgSexFreq ~ SmokeNow+AlcoholYear+RegularMarij+Age+Gender+segmentincome+Education, df)
+car::vif(nonintmodel,type = 'predictor')
+```
+
+```{r outliers}
+model.deffits=dffits(m1)
+model.CD = cooks.distance(m1)
+model.deffits[which.max(model.deffits)]
+model.CD[which.max(model.CD)]
+n = nrow(df)
+p = m1$rank
+plot(m1, which = 4)
+abline(h=4/n,lty=2)
+df[c(3240, 7919, 8682),]
+
+```
+
+```{r plot for outlier}
+ols_plot_resid_lev(m1)
+df[c(1354, 1618),]
+```
+Coefficient Interpretation is as follows:
+$$\frac{f(x+1)}{f(x)}-1 = (e^{\beta_1}-1)*100$$
+
+```{r remove outliers}
+df2 = df[-c(7919),]
+m2 = lm(AvgSexFreq ~ SmokeNow+AlcoholYear+RegularMarij+HardDrugs+RegularMarij*HardDrugs+Age+Gender+segmentincome+Education, df2)
+summary(m1)
+summary(m2)
+100*(abs(coef(m1)-coef(m2)))/coef(m1)
+
+
+```
+
+```{r rerun qqplot}
+m2 = lm(AvgSexFreq ~ SmokeNow+AlcoholYear+RegularMarij+HardDrugs+RegularMarij*HardDrugs+Age+Gender+segmentincome+Education, df2)
+
+m2.res = m2$residuals
+
+car::qqPlot(m2.res)
+```
+
