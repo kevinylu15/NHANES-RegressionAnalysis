@@ -24,26 +24,26 @@ library("gridExtra")
 
 ```{r}
 # Load in NHANES dataset
-df = NHANES
+df <- NHANES
 ```
 
 ```{r EDA}
 # List of covariates for the model
-covariates = c("SexAge","Gender","HHIncome","Education","PhysActive","SameSex","AlcoholYear","RegularMarij","HardDrugs")
+covariates <- c("SexAge","Gender","HHIncome","Education","PhysActive","SameSex","AlcoholYear","RegularMarij","HardDrugs")
 ```
 
 Examining relationships between sexual habits and drug use with different variables to determine which models fit better
 ```{r}
 # Model 1: Examining the relationship between smoking status and age at first sexual activity
-model = lm(SexAge ~ SmokeNow, df)
+model <- lm(SexAge ~ SmokeNow, df)
 summary(model)
 
 # Model 2: Examining the relationship between age of first alcohol use and age at first sexual activity
-model = lm(SexAge ~ AlcoholYear, df)
+model <- lm(SexAge ~ AlcoholYear, df)
 summary(model)
 
 # Model 3: Examining the interaction effect of regular marijuana and hard drug use on age at first sexual activity
-model = lm(SexAge ~ RegularMarij + HardDrugs + RegularMarij * HardDrugs, df)
+model <- lm(SexAge ~ RegularMarij + HardDrugs + RegularMarij * HardDrugs, df)
 summary(model)
 
 # Display the regression results for Model 3 in a clean table format
@@ -76,11 +76,9 @@ hist(df$SexNumPartYear, main = "Number of Sexual Partners per Year")
 hist(df$SexNumPartnLife, main = "Lifetime Number of Sexual Partners")
 
 # Show observations where the age at first sexual activity (SexAge) exceeds the current age (Age)
-# This checks for any logical inconsistencies in the data.
 df[which(df$SexAge > df$Age), ]
 
-# Identify observations with more than 40 sexual partners during their lifetime
-# These are potential outliers in the dataset.
+# Identify observations with more than 40 sexual partners during their lifetime (potential outliers)
 boxplot(df$SexNumPartnLife, main = "Number of Sexual Partners Distribution Before Outlier Removal")
 df[which(df$SexNumPartnLife > 40), c("Age", "SexAge", "SexNumPartnLife")]
 
@@ -100,8 +98,6 @@ df <- mutate(df, AvgSexFreq = log(SexNumPartnLife / (Age - SexAge)))
 hist(df$AvgSexFreq, main = "AvgSexFreq After Log Transformation")
 
 # Create a summary table grouped by hard drug use
-# This table shows mean and standard deviation for continuous variables,
-# and counts and percentages for categorical variables.
 tbl_summary(
   df,
   by = HardDrugs,
@@ -119,25 +115,17 @@ $$AvgSexFreq = \log\left(\frac{SexNumPartnLife}{Age - SexAge}\right)$$
 # Identify observations where AvgSexFreq is negative infinity
 # This occurs when the denominator (Age - SexAge) is 0 or the numerator (SexNumPartnLife) is invalid.
 obs <- df[is.infinite(df$AvgSexFreq), ]
-
-# Display the relevant columns for these observations to understand the issue
 obs[, c("Age", "SexAge", "SexNumPartnLife")]
 
 # Replace negative infinity in AvgSexFreq with 0 for invalid observations
-# This ensures the dataset remains usable for modeling without errors.
 df$AvgSexFreq[is.infinite(df$AvgSexFreq)] <- 0
 
 # Build a multiple linear regression model to examine factors influencing AvgSexFreq
-# The predictors include demographic variables, health behaviors, and interactions between Regular Marijuana use and Hard Drug use.
 model <- lm(
-  AvgSexFreq ~ SmokeNow + AlcoholYear + RegularMarij + HardDrugs + RegularMarij * HardDrugs + Age + Gender + HHIncome + Education + BMI + DiabetesAge + Depressed +
-               LittleInterest + PhysActive + SameSex,df)
-
-# Display the summary of the regression model
+  AvgSexFreq ~ SmokeNow + AlcoholYear + RegularMarij + HardDrugs + RegularMarij * HardDrugs + Age + Gender + HHIncome + Education + BMI + DiabetesAge + Depressed + LittleInterest + PhysActive + SameSex,df)
 summary(model)
 
 # Generate a clean regression table with specific variables highlighted
-# This table includes the intercept and focuses on key predictors for easy interpretation.
 model |>
   tbl_regression(
     intercept = TRUE, 
@@ -156,16 +144,7 @@ n <- 30
 
 # Perform ANOVA on the linear model to analyze variance components
 aov <- anova(
-  model <- lm(
-    AvgSexFreq ~ SmokeNow + AlcoholYear + RegularMarij + HardDrugs + RegularMarij * HardDrugs +
-                 Age + Gender + HHIncome + Education + BMI + DiabetesAge + Depressed +
-                 LittleInterest + PhysActive + SameSex,
-    df
-  )
-)
-
-# Print the ANOVA table
-aov
+model <- lm(AvgSexFreq ~ SmokeNow + AlcoholYear + RegularMarij + HardDrugs + RegularMarij * HardDrugs + Age + Gender + HHIncome + Education + BMI + DiabetesAge + Depressed + LittleInterest + PhysActive + SameSex, df))
 
 # Calculate the total sum of squares (SSY)
 SSY <- sum(aov$"Sum Sq")
