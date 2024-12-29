@@ -15,23 +15,23 @@ RUN;
 /*  EXPLORATORY DATA ANALYSIS (EDA) */
 /***************************************************************************/
 
-/* 2.1 Histograms */
+/* Histograms */
 
 /* In SAS, you can use PROC UNIVARIATE or PROC SGPLOT to create histograms. */
 
-/* (i) Histogram for SexAge */
+/* Histogram for SexAge */
 PROC SGPLOT DATA=work.df;
   HISTOGRAM SexAge;
   TITLE "First Age at which Sexual Activity Occurred";
 RUN;
 
-/* (ii) Histogram for SexNumPartYear */
+/* Histogram for SexNumPartYear */
 PROC SGPLOT DATA=work.df;
   HISTOGRAM SexNumPartYear;
   TITLE "Number of Sexual Partners per Year";
 RUN;
 
-/* (iii) Histogram for SexNumPartnLife */
+/* Histogram for SexNumPartnLife */
 PROC SGPLOT DATA=work.df;
   HISTOGRAM SexNumPartnLife;
   TITLE "Lifetime Number of Sexual Partners";
